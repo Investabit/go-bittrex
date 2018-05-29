@@ -95,7 +95,7 @@ func (c *client) doTimeoutRequest(timer *time.Timer, req *http.Request) (*http.R
 }
 
 // do prepare and process HTTP request to Bittrex API
-func (c *client) do(method string, resource string, payload string, authNeeded bool) (response []byte, err error) {
+func (c *client) do(method string, resource string, payload string, authNeeded bool) (resp *http.Response, response []byte, err error) {
 	connectTimer := time.NewTimer(c.httpTimeout)
 
 	var rawurl string
@@ -131,7 +131,7 @@ func (c *client) do(method string, resource string, payload string, authNeeded b
 		req.Header.Add("apisign", sig)
 	}
 
-	resp, err := c.doTimeoutRequest(connectTimer, req)
+	resp, err = c.doTimeoutRequest(connectTimer, req)
 	if err != nil {
 		return
 	}
@@ -140,10 +140,10 @@ func (c *client) do(method string, resource string, payload string, authNeeded b
 	response, err = ioutil.ReadAll(resp.Body)
 	//fmt.Println(fmt.Sprintf("reponse %s", response), err)
 	if err != nil {
-		return response, err
+		return
 	}
 	if resp.StatusCode != 200 {
 		err = errors.New(resp.Status)
 	}
-	return response, err
+	return
 }
