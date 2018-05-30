@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,15 @@ const (
 // New returns an instantiated bittrex struct
 func New(apiKey, apiSecret string) *Bittrex {
 	client := NewClient(apiKey, apiSecret)
+	return &Bittrex{client}
+}
+
+func NewSerializedWithCustomHttpClient(
+	apiKey, apiSecret string,
+	httpClient *http.Client,
+	mutex *sync.Mutex,
+) *Bittrex {
+	client := NewSerializedClientWithCustomHttpConfig(apiKey, apiSecret, httpClient, mutex)
 	return &Bittrex{client}
 }
 

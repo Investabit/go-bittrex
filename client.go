@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,11 +21,18 @@ type client struct {
 	httpClient  *http.Client
 	httpTimeout time.Duration
 	debug       bool
+
+	enableSerialization bool
+	mutex               *sync.Mutex
 }
 
 // NewClient return a new Bittrex HTTP client
 func NewClient(apiKey, apiSecret string) (c *client) {
-	return &client{apiKey, apiSecret, &http.Client{}, 30 * time.Second, false}
+	return NewClientWithCustomHttpConfig(
+		apiKey,
+		apiSecret,
+		&http.Client{},
+	)
 }
 
 // NewClientWithCustomHttpConfig returns a new Bittrex HTTP client using the predefined http client
@@ -33,12 +41,24 @@ func NewClientWithCustomHttpConfig(apiKey, apiSecret string, httpClient *http.Cl
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &client{apiKey, apiSecret, httpClient, timeout, false}
+	return &client{apiKey, apiSecret, httpClient, timeout, false, false, nil}
+}
+
+func NewSerializedClientWithCustomHttpConfig(
+	apiKey, apiSecret string,
+	httpClient *http.Client,
+	mutex *sync.Mutex,
+) (c *client) {
+	timeout := httpClient.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return &client{apiKey, apiSecret, httpClient, timeout, false, true, mutex}
 }
 
 // NewClient returns a new Bittrex HTTP client with custom timeout
 func NewClientWithCustomTimeout(apiKey, apiSecret string, timeout time.Duration) (c *client) {
-	return &client{apiKey, apiSecret, &http.Client{}, timeout, false}
+	return &client{apiKey, apiSecret, &http.Client{}, timeout, false, false, nil}
 }
 
 func (c client) dumpRequest(r *http.Request) {
@@ -94,6 +114,31 @@ func (c *client) doTimeoutRequest(timer *time.Timer, req *http.Request) (*http.R
 	}
 }
 
+func (c *client) makeRequest(req *http.Request, connectTimer *time.Timer, authNeeded bool) (resp *http.Response, err error) {
+	if c.enableSerialization {
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+	}
+
+	if authNeeded {
+		if len(c.apiKey) == 0 || len(c.apiSecret) == 0 {
+			err = errors.New("You need to set API Key and API Secret to call this method")
+			return
+		}
+		nonce := time.Now().UnixNano()
+		q := req.URL.Query()
+		q.Set("apikey", c.apiKey)
+		q.Set("nonce", fmt.Sprintf("%d", nonce))
+		req.URL.RawQuery = q.Encode()
+		mac := hmac.New(sha512.New, []byte(c.apiSecret))
+		_, err = mac.Write([]byte(req.URL.String()))
+		sig := hex.EncodeToString(mac.Sum(nil))
+		req.Header.Add("apisign", sig)
+	}
+
+	return c.doTimeoutRequest(connectTimer, req)
+}
+
 // do prepare and process HTTP request to Bittrex API
 func (c *client) do(method string, resource string, payload string, authNeeded bool) (resp *http.Response, response []byte, err error) {
 	connectTimer := time.NewTimer(c.httpTimeout)
@@ -114,24 +159,8 @@ func (c *client) do(method string, resource string, payload string, authNeeded b
 	}
 	req.Header.Add("Accept", "application/json")
 
-	// Auth
-	if authNeeded {
-		if len(c.apiKey) == 0 || len(c.apiSecret) == 0 {
-			err = errors.New("You need to set API Key and API Secret to call this method")
-			return
-		}
-		nonce := time.Now().UnixNano()
-		q := req.URL.Query()
-		q.Set("apikey", c.apiKey)
-		q.Set("nonce", fmt.Sprintf("%d", nonce))
-		req.URL.RawQuery = q.Encode()
-		mac := hmac.New(sha512.New, []byte(c.apiSecret))
-		_, err = mac.Write([]byte(req.URL.String()))
-		sig := hex.EncodeToString(mac.Sum(nil))
-		req.Header.Add("apisign", sig)
-	}
+	resp, err = c.makeRequest(req, connectTimer, authNeeded)
 
-	resp, err = c.doTimeoutRequest(connectTimer, req)
 	if err != nil {
 		return
 	}
