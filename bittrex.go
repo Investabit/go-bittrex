@@ -298,12 +298,12 @@ func (b *Bittrex) CancelOrder(orderID string) (resp *http.Response, err error) {
 // GetOpenOrders returns orders that you currently have opened.
 // If market is set to "all", GetOpenOrders return all orders
 // If market is set to a specific order, GetOpenOrders return orders for this market
-func (b *Bittrex) GetOpenOrders(market string) (openOrders []Order, err error) {
+func (b *Bittrex) GetOpenOrders(market string) (openOrders []Order, resp *http.Response, err error) {
 	resource := "market/getopenorders"
 	if market != "all" {
 		resource += "?market=" + strings.ToUpper(market)
 	}
-	_, r, err := b.client.do("GET", resource, "", true)
+	resp, r, err := b.client.do("GET", resource, "", true)
 	if err != nil {
 		return
 	}
